@@ -1,0 +1,24 @@
+{
+  "name": "smekda-mart-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Aplikasi Android Smekda Mart SMKN 2 Purwakarta (Capacitor + HTML/CSS/JavaScript)",
+  "scripts": {
+    "ikon": "capacitor-assets generate --android",
+    "sync": "cap sync android",
+    "buka": "cap open android",
+    "apk": "cd android && gradlew assembleDebug",
+    "tes": "node scripts/server-lokal.mjs"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/browser": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/splash-screen": "^7.0.0",
+    "cordova-plugin-inappbrowser": "^6.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^7.0.0"
+  }
+}

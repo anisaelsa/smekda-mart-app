@@ -1,0 +1,22 @@
+{
+  "appId": "id.sch.smkn2pwk.smekdamart",
+  "appName": "Smekda Mart",
+  "webDir": "www",
+  "backgroundColor": "#b3001b",
+  "android": {
+    "allowMixedContent": false,
+    "adjustMarginsForEdgeToEdge": "auto"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    },
+    "SplashScreen": {
+      "launchShowDuration": 1800,
+      "launchAutoHide": true,
+      "backgroundColor": "#b3001b",
+      "androidScaleType": "CENTER_CROP",
+      "showSpinner": false
+    }
+  }
+}

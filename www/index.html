@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#b3001b">
+  <title>Smekda Mart</title>
+  <link rel="stylesheet" href="vendor/fontawesome/css/all.min.css">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+  <div id="app">
+
+    <!-- Bilah atas -->
+    <header class="appbar">
+      <div class="appbar__brand">
+        <img src="assets/images/smekda-removebg-preview.png" alt="Logo Smekda Mart" class="appbar__logo">
+        <div>
+          <div class="appbar__title">Smekda Mart</div>
+          <div class="appbar__subtitle">SMKN 2 PURWAKARTA</div>
+        </div>
+      </div>
+      <div class="appbar__aksi">
+        <a href="#/login" class="appbar__login"><i class="fa-solid fa-right-to-bracket"></i> Login</a>
+        <button id="btnRefresh" class="appbar__btn" aria-label="Muat ulang data">
+          <i class="fa-solid fa-rotate-right"></i>
+        </button>
+      </div>
+    </header>
+
+    <!-- Spanduk status koneksi -->
+    <div id="statusBanner" class="banner" hidden></div>
+
+    <!-- Isi halaman (diisi oleh js/app.js) -->
+    <main id="view" class="view" aria-live="polite"></main>
+
+    <!-- Navigasi bawah -->
+    <nav class="tabbar" aria-label="Navigasi utama">
+      <a href="#/beranda" class="tabbar__item" data-tab="beranda"><i class="fa-solid fa-house"></i><span>Beranda</span></a>
+      <a href="#/produk"  class="tabbar__item" data-tab="produk"><i class="fa-solid fa-basket-shopping"></i><span>Produk</span></a>
+      <a href="#/profil"  class="tabbar__item" data-tab="profil"><i class="fa-solid fa-store"></i><span>Profil</span></a>
+      <a href="#/galeri"  class="tabbar__item" data-tab="galeri"><i class="fa-solid fa-images"></i><span>Galeri</span></a>
+      <a href="#/tentang" class="tabbar__item" data-tab="tentang"><i class="fa-solid fa-circle-info"></i><span>Tentang</span></a>
+    </nav>
+  </div>
+
+  <!-- Penampil foto galeri -->
+  <div id="lightbox" class="lightbox" hidden>
+    <button id="lbClose" class="lightbox__close" aria-label="Tutup"><i class="fa-solid fa-xmark"></i></button>
+    <button id="lbPrev" class="lightbox__nav lightbox__nav--prev" aria-label="Foto sebelumnya"><i class="fa-solid fa-chevron-left"></i></button>
+    <figure class="lightbox__figure">
+      <img id="lbImg" alt="">
+      <figcaption id="lbCaption"></figcaption>
+    </figure>
+    <button id="lbNext" class="lightbox__nav lightbox__nav--next" aria-label="Foto berikutnya"><i class="fa-solid fa-chevron-right"></i></button>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

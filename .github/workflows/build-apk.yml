@@ -1,0 +1,88 @@
+# =====================================================================
+# Membangun APK (dan AAB) Smekda Mart di server GitHub — gratis, tanpa Android Studio.
+# Cara pakai: tab "Actions" di GitHub -> "Build APK Smekda Mart" -> "Run workflow".
+# Hasilnya ada di bagian "Artifacts" pada halaman proses tersebut.
+# =====================================================================
+name: Build APK Smekda Mart
+
+on:
+  workflow_dispatch:        # dijalankan manual lewat tombol
+  push:
+    branches: [main]        # dan otomatis setiap push ke cabang main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # true bila kunci rilis sudah diisi di GitHub Secrets (dipakai untuk menentukan langkah rilis)
+      ADA_KUNCI: ${{ secrets.KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Pasang dependensi
+        run: npm install
+
+      - name: Buat proyek Android (hanya jika folder android/ belum ada)
+        run: |
+          if [ ! -d android ]; then npx cap add android; fi
+
+      - name: Buat ikon & splash screen dari folder resources/
+        run: npx capacitor-assets generate --android
+
+      - name: Salin isi www/ ke proyek Android
+        run: npx cap sync android
+
+      - name: Build APK debug (bisa langsung diinstal di HP)
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Simpan APK debug
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmekdaMart-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+
+      # ------------------------------------------------------------------
+      # Bagian RILIS (untuk Google Play) — hanya jalan bila 4 "Secrets" ini
+      # sudah diisi di GitHub: KEYSTORE_BASE64, KEYSTORE_PASSWORD,
+      # KEY_ALIAS, KEY_PASSWORD  (lihat docs/DOKUMENTASI.md, bagian "Publikasi")
+      # ------------------------------------------------------------------
+      - name: Build rilis (APK + AAB) dan tanda tangani
+        if: env.ADA_KUNCI == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -e
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/rilis.jks"
+          (cd android && ./gradlew assembleRelease bundleRelease)
+          BT="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          mkdir -p rilis
+          UNSIGNED=$(ls android/app/build/outputs/apk/release/*.apk | head -1)
+          "$BT/zipalign" -f -p 4 "$UNSIGNED" rilis/aligned.apk
+          "$BT/apksigner" sign --ks "$RUNNER_TEMP/rilis.jks" --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:KS_PASS --key-pass env:KEY_PASS --out rilis/SmekdaMart-rilis.apk rilis/aligned.apk
+          rm rilis/aligned.apk
+          cp android/app/build/outputs/bundle/release/app-release.aab rilis/SmekdaMart-rilis.aab
+          jarsigner -keystore "$RUNNER_TEMP/rilis.jks" -storepass "$KS_PASS" -keypass "$KEY_PASS" \
+            rilis/SmekdaMart-rilis.aab "$KEY_ALIAS"
+
+      - name: Simpan APK + AAB rilis
+        if: env.ADA_KUNCI == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SmekdaMart-rilis
+          path: rilis/*
