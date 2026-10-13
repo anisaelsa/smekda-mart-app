@@ -39,7 +39,7 @@ export const TENTANG = {
     nama: 'Anisa Paradina Agustin',
     jurusan: 'Rekayasa Perangkat Lunak (RPL)',
     sekolah: 'SMK Negeri 2 Purwakarta',
-    keterangan: 'Proyek tugas sekolah',
+    keterangan: 'Lulusan Tahun 2027',
   },
   // Cara penggunaan: ikon = nama ikon Font Awesome (tanpa "fa-")
   langkah: [

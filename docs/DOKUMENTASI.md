@@ -206,7 +206,7 @@ Pengujian memakai berkas contoh di `tests/fixture/`, **bukan** website asli.
 
 | Gejala | Penyebab & solusi |
 |---|---|
-| Aplikasi menampilkan “Data tidak dapat dibaca” padahal internet aktif | Hosting gratis kadang menampilkan halaman pengaman bot / pemeliharaan. Coba lagi beberapa menit; bila terus terjadi, minta AI menyesuaikan `api.js`. |
+| Aplikasi menampilkan “Data tidak dapat dibaca” padahal internet aktif | Hosting gratis (site.je) memasang pemeriksaan pengaman: permintaan pertama dijawab halaman kecil berisi teka-teki AES (`aes.js`, cookie `__test`). Sejak versi 1.4, `api.js` menjawabnya otomatis seperti browser (fungsi `hitungCookieUji`), lalu meminta ulang `/?i=1`. Bila hosting mengubah cara pengamannya, sesuaikan fungsi itu. |
 | Foto tidak muncul | Cek `PAKAI_FOTO_LOKAL` di `config.js`; foto baru yang diunggah admin diambil dari website (perlu internet). |
 | Bilah atas tertutup status bar HP | Sesuaikan `--atas-aman` di `app.css` atau hubungi AI dengan tangkapan layar. |
 | `npm run ikon` gagal | Pastikan `npm install` sudah selesai dan folder `android/` sudah dibuat (`npx cap add android`). |

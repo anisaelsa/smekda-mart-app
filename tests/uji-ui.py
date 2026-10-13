@@ -38,6 +38,12 @@ def pasang_rute(page, fixture, state):
         req = route.request
         if state.get("putus"):
             return route.abort("internetdisconnected")
+        if state.get("tantangan") and req.resource_type in ("fetch", "xhr") and req.url.startswith(SITE):
+            state.setdefault("permintaan", []).append(req.url)
+            nama = "home.html" if req.url == SITE + "/?i=1" else "tantangan.html"
+            isi = open(os.path.join(FIX, nama), encoding="utf-8").read()
+            return route.fulfill(status=200, body=isi, content_type="text/html; charset=utf-8",
+                                 headers={"access-control-allow-origin": "*"})
         if req.url.rstrip("/") == SITE and req.resource_type in ("fetch", "xhr"):
             isi = open(os.path.join(FIX, state.get("fixture", fixture)), encoding="utf-8").read()
             return route.fulfill(status=state.get("status", 200), body=isi, content_type="text/html; charset=utf-8",
@@ -201,6 +207,18 @@ with sync_playwright() as p:
     ctx, page, st, log = buka(br, status=503)
     page.wait_for_selector(".error")
     cek("Server 503 -> error 'Website sedang bermasalah'", "bermasalah" in page.inner_text(".error h2"))
+    ctx.close()
+
+    # ---------- 5. Pemeriksaan pengaman hosting (teka-teki AES, data asli dari website) ----------
+    ctx, page, st, log = buka(br, tantangan=True)
+    page.wait_for_selector(".kategori")
+    cek("Pengaman hosting: teka-teki dijawab, halaman asli terbaca", page.locator(".kategori").count() == 4)
+    cek("Pengaman hosting: meminta '/' lalu '/?i=1'",
+        st.get("permintaan", [])[:2] == [SITE + "/", SITE + "/?i=1"], str(st.get("permintaan")))
+    uji = page.evaluate("JSON.parse(localStorage.getItem('smekda' + 'mart.uji.v1') || 'null')")
+    cek("Pengaman hosting: nilai cookie __test = 3d18a9f6...3095 (cocok dengan AES standar)",
+        bool(uji) and uji.get("nilai") == "3d18a9f69fe23114bb6e16d13b832095", str(uji))
+    cek("Pengaman hosting: tidak ada error di konsol", not log["console"], str(log["console"]))
     ctx.close()
 
     br.close()

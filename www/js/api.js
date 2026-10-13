@@ -154,20 +154,78 @@ function denganBatasWaktu(promise, ms) {
   ]);
 }
 
-async function unduhHtml() {
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new AppError('OFFLINE');
-  // Mode demo: hanya untuk melihat tampilan di komputer (lihat scripts/server-lokal.mjs)
-  const demo = new URLSearchParams(location.search).get('demo') === '1' && location.port === '5173';
-  const alamat = demo ? '/__demo__' : BASE_URL + '/';
+// ---------- Pemeriksaan pengaman hosting gratis ----------
+// Hosting gratis (site.je) menjawab permintaan pertama dengan halaman kecil berisi teka-teki
+// (AES) yang biasanya dijawab otomatis oleh browser: jawabannya disimpan sebagai cookie
+// "__test", lalu halaman dimuat ulang ke "/?i=1". Aplikasi menjawabnya dengan cara yang sama
+// supaya bisa membaca halaman asli. Hanya membaca, website tidak diubah.
+const KUNCI_UJI = 'smekdamart.uji.v1';
+const UMUR_UJI_MS = 5 * 60 * 60 * 1000; // cookie berlaku 6 jam, dipakai ulang 5 jam
+
+export const adaTantangan = (html) => /slowAES/.test(html) && /toNumbers\("[0-9a-fA-F]+"\)/.test(html);
+
+const hexKeBytes = (h) => Uint8Array.from(h.match(/../g).map((x) => parseInt(x, 16)));
+const bytesKeHex = (b) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+
+/** Menjawab teka-teki: AES-128-CBC dekripsi 1 blok -> teks hex (nilai cookie __test). */
+export async function hitungCookieUji(html) {
+  const bagian = [...html.matchAll(/toNumbers\("([0-9a-fA-F]+)"\)/g)].map((m) => m[1]);
+  if (bagian.length < 3 || !globalThis.crypto?.subtle) throw new AppError('FORMAT', 'Tantangan tidak dikenali');
+  const [kunci, iv, sandi] = bagian.slice(0, 3).map(hexKeBytes);
+  if (kunci.length !== 16 || iv.length !== 16 || sandi.length !== 16) throw new AppError('FORMAT', 'Tantangan tidak dikenali');
+
+  const subtle = globalThis.crypto.subtle;
+  const k = await subtle.importKey('raw', kunci, 'AES-CBC', false, ['encrypt', 'decrypt']);
+  // WebCrypto mewajibkan "padding" di akhir data, sedangkan teka-teki ini tanpa padding.
+  // Solusinya: tambahkan satu blok pengisi yang sah, lalu hasilnya otomatis terpotong 16 byte.
+  const pengisi = new Uint8Array(16).fill(16);
+  const blokPengisi = new Uint8Array(await subtle.encrypt({ name: 'AES-CBC', iv: sandi }, k, pengisi)).slice(0, 16);
+  const gabung = new Uint8Array(32);
+  gabung.set(sandi, 0);
+  gabung.set(blokPengisi, 16);
+  const hasil = new Uint8Array(await subtle.decrypt({ name: 'AES-CBC', iv }, k, gabung));
+  return bytesKeHex(hasil);
+}
+
+function bacaCookieUji() {
+  try {
+    const o = JSON.parse(localStorage.getItem(KUNCI_UJI) || 'null');
+    return o && Date.now() - o.waktu < UMUR_UJI_MS ? o.nilai : '';
+  } catch { return ''; }
+}
+function simpanCookieUji(nilai) {
+  try { localStorage.setItem(KUNCI_UJI, JSON.stringify({ nilai, waktu: Date.now() })); } catch { /* abaikan */ }
+}
+
+async function ambilHalaman(alamat, cookie) {
+  const headers = { Accept: 'text/html' };
+  if (cookie) headers.Cookie = '__test=' + cookie;
   let res;
   try {
-    res = await denganBatasWaktu(fetch(alamat, { headers: { Accept: 'text/html' } }), REQUEST_TIMEOUT_MS);
+    res = await denganBatasWaktu(fetch(alamat, { headers }), REQUEST_TIMEOUT_MS);
   } catch (e) {
     if (e instanceof AppError) throw e;
     throw new AppError('NETWORK', e && e.message);
   }
   if (!res.ok) throw new AppError('HTTP', 'Status ' + res.status);
   return res.text();
+}
+
+async function unduhHtml() {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new AppError('OFFLINE');
+  // Mode demo: hanya untuk melihat tampilan di komputer (lihat scripts/server-lokal.mjs)
+  const demo = new URLSearchParams(location.search).get('demo') === '1' && location.port === '5173';
+  if (demo) return ambilHalaman('/__demo__');
+
+  let cookie = bacaCookieUji();
+  let html = await ambilHalaman(BASE_URL + (cookie ? '/?i=1' : '/'), cookie);
+  if (adaTantangan(html)) {
+    cookie = await hitungCookieUji(html);
+    simpanCookieUji(cookie);
+    html = await ambilHalaman(BASE_URL + '/?i=1', cookie);
+    if (adaTantangan(html)) throw new AppError('FORMAT', 'Pemeriksaan pengaman tidak lolos');
+  }
+  return html;
 }
 
 /**
