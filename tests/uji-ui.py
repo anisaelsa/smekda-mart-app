@@ -40,7 +40,7 @@ def pasang_rute(page, fixture, state):
             return route.abort("internetdisconnected")
         if state.get("tantangan") and req.resource_type in ("fetch", "xhr") and req.url.startswith(SITE):
             state.setdefault("permintaan", []).append(req.url)
-            nama = "home.html" if req.url == SITE + "/?i=1" else "tantangan.html"
+            nama = "home.html" if state.get("cookie_ok") else "tantangan.html"
             isi = open(os.path.join(FIX, nama), encoding="utf-8").read()
             return route.fulfill(status=200, body=isi, content_type="text/html; charset=utf-8",
                                  headers={"access-control-allow-origin": "*"})
@@ -52,7 +52,7 @@ def pasang_rute(page, fixture, state):
         return route.fulfill(status=200, body=PNG, content_type="image/png")
     page.route(lambda u: not u.startswith(f"http://127.0.0.1:{PORT}"), handler)
 
-def buka(browser, fixture="home.html", **state):
+def buka(browser, fixture="home.html", hook=None, **state):
     ctx = browser.new_context(viewport={"width": 390, "height": 844}, device_scale_factor=2, is_mobile=True, has_touch=True)
     page = ctx.new_page()
     log = {"console": [], "gagal_lokal": []}
@@ -61,6 +61,7 @@ def buka(browser, fixture="home.html", **state):
     page.on("response", lambda r: log["gagal_lokal"].append(r.url) if r.url.startswith(f"http://127.0.0.1:{PORT}") and r.status >= 400 else None)
     st = dict(state)
     pasang_rute(page, fixture, st)
+    if hook: hook(page, st)
     page.goto(f"http://127.0.0.1:{PORT}/index.html#/beranda")
     return ctx, page, st, log
 
@@ -210,15 +211,74 @@ with sync_playwright() as p:
     ctx.close()
 
     # ---------- 5. Pemeriksaan pengaman hosting (teka-teki AES, data asli dari website) ----------
-    ctx, page, st, log = buka(br, tantangan=True)
+    # Di HP, cookie jawaban harus dititipkan ke penyimpanan cookie HP (bukan lewat header fetch).
+    # Plugin Capacitor/Cordova ditiru (mock) supaya alurnya bisa diuji di komputer.
+    COOKIE_BENAR = "3d18a9f69fe23114bb6e16d13b832095"
+
+    def hook_plugin(efektif):
+        def pasang(page, st):
+            def titip(o):
+                st["titip"] = o
+                if efektif: st["cookie_ok"] = True
+            page.expose_function("__titip", titip)
+            page.add_init_script("window.Capacitor = {Plugins:{CapacitorCookies:{setCookie: async (o)=>{ await window.__titip(o); }}}};")
+        return pasang
+
+    def hook_browser(page_st_ok=True):
+        def pasang(page, st):
+            def buka_iab(opsi):
+                st["iab_opsi"] = opsi
+                if page_st_ok: st["cookie_ok"] = True
+            def tutup_iab(): st["iab_tutup"] = True
+            page.expose_function("__iabBuka", buka_iab)
+            page.expose_function("__iabTutup", tutup_iab)
+            page.add_init_script("""
+              window.cordova = {InAppBrowser:{open:(u,t,o)=>{
+                window.__iabBuka(o); const cb={};
+                const ref={addEventListener:(n,f)=>{cb[n]=f;}, close:()=>window.__iabTutup()};
+                setTimeout(()=>{ cb.loadstop && cb.loadstop({url:u}); cb.loadstop && cb.loadstop({url:u+'?i=1'}); }, 50);
+                return ref; }}};""")
+        return pasang
+
+    # 5a. Cara 1: titip cookie lewat plugin CapacitorCookies
+    ctx, page, st, log = buka(br, hook=hook_plugin(True), tantangan=True)
     page.wait_for_selector(".kategori")
     cek("Pengaman hosting: teka-teki dijawab, halaman asli terbaca", page.locator(".kategori").count() == 4)
-    cek("Pengaman hosting: meminta '/' lalu '/?i=1'",
-        st.get("permintaan", [])[:2] == [SITE + "/", SITE + "/?i=1"], str(st.get("permintaan")))
-    uji = page.evaluate("JSON.parse(localStorage.getItem('smekda' + 'mart.uji.v1') || 'null')")
-    cek("Pengaman hosting: nilai cookie __test = 3d18a9f6...3095 (cocok dengan AES standar)",
-        bool(uji) and uji.get("nilai") == "3d18a9f69fe23114bb6e16d13b832095", str(uji))
+    t = st.get("titip") or {}
+    cek("Pengaman hosting: cookie __test dititip ke alamat website, nilainya cocok dengan AES standar",
+        t.get("key") == "__test" and t.get("value") == COOKIE_BENAR and t.get("url") == SITE, str(t))
+    cek("Pengaman hosting: cookie tidak ditulis ke halaman aplikasi sendiri",
+        not page.evaluate("document.cookie.includes('__test')"))
     cek("Pengaman hosting: tidak ada error di konsol", not log["console"], str(log["console"]))
+    ctx.close()
+
+    # 5b. Cara 2 (cadangan): plugin cookie tidak ada -> browser tersembunyi
+    ctx, page, st, log = buka(br, hook=hook_browser(True), tantangan=True)
+    page.wait_for_selector(".kategori")
+    cek("Pengaman hosting (cadangan): browser tersembunyi menjawab, halaman asli terbaca", page.locator(".kategori").count() == 4)
+    cek("Pengaman hosting (cadangan): dibuka tersembunyi & ditutup lagi",
+        "hidden=yes" in st.get("iab_opsi", "") and st.get("iab_tutup") is True, str(st))
+    ctx.close()
+
+    # 5c. Titip cookie berhasil dipanggil tapi tidak ngefek -> tetap pulih lewat cadangan
+    def kedua(page, st):
+        hook_plugin(False)(page, st)
+        page.expose_function("__iabBuka", lambda o: st.update(cookie_ok=True))
+        page.expose_function("__iabTutup", lambda: None)
+        page.add_init_script("""
+          window.cordova = {InAppBrowser:{open:(u,t,o)=>{ window.__iabBuka(o); const cb={};
+            setTimeout(()=>{ cb.loadstop && cb.loadstop({url:u+'?i=1'}); }, 50);
+            return {addEventListener:(n,f)=>{cb[n]=f;}, close:()=>window.__iabTutup()}; }}};""")
+    ctx, page, st, log = buka(br, hook=kedua, tantangan=True)
+    page.wait_for_selector(".kategori")
+    cek("Pengaman hosting: cookie dititip tapi tak berefek -> pulih lewat browser tersembunyi", page.locator(".kategori").count() == 4)
+    ctx.close()
+
+    # 5d. Dua cara gagal -> error yang jelas, tidak berputar tanpa henti
+    ctx, page, st, log = buka(br, hook=hook_plugin(False), tantangan=True)
+    page.wait_for_selector(".error")
+    cek("Pengaman hosting: semua cara gagal -> error 'Data tidak dapat dibaca'", "tidak dapat dibaca" in page.inner_text(".error h2"))
+    cek("Pengaman hosting: jumlah permintaan terbatas (tidak berputar)", len(st.get("permintaan", [])) <= 3, str(st.get("permintaan")))
     ctx.close()
 
     br.close()

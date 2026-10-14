@@ -156,12 +156,16 @@ function denganBatasWaktu(promise, ms) {
 
 // ---------- Pemeriksaan pengaman hosting gratis ----------
 // Hosting gratis (site.je) menjawab permintaan pertama dengan halaman kecil berisi teka-teki
-// (AES) yang biasanya dijawab otomatis oleh browser: jawabannya disimpan sebagai cookie
-// "__test", lalu halaman dimuat ulang ke "/?i=1". Aplikasi menjawabnya dengan cara yang sama
-// supaya bisa membaca halaman asli. Hanya membaca, website tidak diubah.
-const KUNCI_UJI = 'smekdamart.uji.v1';
-const UMUR_UJI_MS = 5 * 60 * 60 * 1000; // cookie berlaku 6 jam, dipakai ulang 5 jam
-
+// (AES), yang biasanya dijawab otomatis oleh browser: jawabannya disimpan sebagai cookie
+// "__test", lalu halaman dimuat ulang ke "/?i=1". Aplikasi harus melakukan hal yang sama.
+//
+// PENTING (temuan dari pengujian di HP): di Android, fetch() GET dialihkan Capacitor lewat
+// jalur "proxy" yang memakai cookie dari penyimpanan cookie HP. Header "Cookie" yang diisi
+// manual lewat fetch() DIBUANG (header terlarang di browser). Jadi jawabannya harus
+// dititipkan ke penyimpanan cookie HP, bukan ke header. Ada dua cara, dicoba berurutan:
+//   1. Titip cookie langsung lewat plugin bawaan Capacitor (CapacitorCookies.setCookie).
+//   2. Cadangan: buka website sebentar di browser tersembunyi (InAppBrowser). Browser itu
+//      menjawab teka-teki sendiri dan menyimpan cookie di tempat yang sama.
 export const adaTantangan = (html) => /slowAES/.test(html) && /toNumbers\("[0-9a-fA-F]+"\)/.test(html);
 
 const hexKeBytes = (h) => Uint8Array.from(h.match(/../g).map((x) => parseInt(x, 16)));
@@ -187,22 +191,48 @@ export async function hitungCookieUji(html) {
   return bytesKeHex(hasil);
 }
 
-function bacaCookieUji() {
+/** Cara 1: titip cookie ke penyimpanan cookie HP untuk alamat website. true bila berhasil. */
+async function titipCookie(nilai) {
+  const plugin = window.Capacitor?.Plugins?.CapacitorCookies;
+  if (!plugin?.setCookie) return false;
   try {
-    const o = JSON.parse(localStorage.getItem(KUNCI_UJI) || 'null');
-    return o && Date.now() - o.waktu < UMUR_UJI_MS ? o.nilai : '';
-  } catch { return ''; }
-}
-function simpanCookieUji(nilai) {
-  try { localStorage.setItem(KUNCI_UJI, JSON.stringify({ nilai, waktu: Date.now() })); } catch { /* abaikan */ }
+    await plugin.setCookie({
+      url: BASE_URL, key: '__test', value: nilai, path: '/',
+      expires: new Date(Date.now() + 6 * 60 * 60 * 1000).toUTCString(),
+    });
+    return true;
+  } catch { return false; }
 }
 
-async function ambilHalaman(alamat, cookie) {
-  const headers = { Accept: 'text/html' };
-  if (cookie) headers.Cookie = '__test=' + cookie;
+/** Cara 2 (cadangan): browser tersembunyi memuat website sehingga cookie tersimpan sendiri. */
+function pemanasanBrowser() {
+  return new Promise((selesai) => {
+    const iab = window.cordova?.InAppBrowser;
+    if (!iab?.open) { selesai(false); return; }
+    let beres = false, muat = 0, ref = null;
+    const akhir = (ok) => {
+      if (beres) return;
+      beres = true;
+      clearTimeout(batas);
+      try { ref && ref.close(); } catch { /* abaikan */ }
+      selesai(ok);
+    };
+    const batas = setTimeout(() => akhir(false), 15000);
+    try {
+      ref = iab.open(BASE_URL + '/', '_blank', 'hidden=yes,location=no');
+      ref.addEventListener('loadstop', (e) => {
+        muat += 1;
+        if (/[?&]i=1/.test(e.url || '') || muat >= 2) setTimeout(() => akhir(true), 300);
+      });
+      ref.addEventListener('loaderror', () => akhir(false));
+    } catch { akhir(false); }
+  });
+}
+
+async function ambilHalaman(alamat) {
   let res;
   try {
-    res = await denganBatasWaktu(fetch(alamat, { headers }), REQUEST_TIMEOUT_MS);
+    res = await denganBatasWaktu(fetch(alamat, { headers: { Accept: 'text/html' } }), REQUEST_TIMEOUT_MS);
   } catch (e) {
     if (e instanceof AppError) throw e;
     throw new AppError('NETWORK', e && e.message);
@@ -217,15 +247,20 @@ async function unduhHtml() {
   const demo = new URLSearchParams(location.search).get('demo') === '1' && location.port === '5173';
   if (demo) return ambilHalaman('/__demo__');
 
-  let cookie = bacaCookieUji();
-  let html = await ambilHalaman(BASE_URL + (cookie ? '/?i=1' : '/'), cookie);
-  if (adaTantangan(html)) {
-    cookie = await hitungCookieUji(html);
-    simpanCookieUji(cookie);
-    html = await ambilHalaman(BASE_URL + '/?i=1', cookie);
-    if (adaTantangan(html)) throw new AppError('FORMAT', 'Pemeriksaan pengaman tidak lolos');
+  let html = await ambilHalaman(BASE_URL + '/');
+  if (!adaTantangan(html)) return html;
+
+  // Cara 1: jawab teka-teki sendiri, titipkan cookie-nya ke penyimpanan cookie HP
+  if (await titipCookie(await hitungCookieUji(html))) {
+    html = await ambilHalaman(BASE_URL + '/?i=1');
+    if (!adaTantangan(html)) return html;
   }
-  return html;
+  // Cara 2: biarkan browser tersembunyi yang menjawab
+  if (await pemanasanBrowser()) {
+    html = await ambilHalaman(BASE_URL + '/?i=1');
+    if (!adaTantangan(html)) return html;
+  }
+  throw new AppError('FORMAT', 'Pemeriksaan pengaman tidak lolos');
 }
 
 /**
